@@ -1,0 +1,11 @@
+services:
+  jyotish_api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: jyotish_api
+    ports:
+      - "9393:8080"
+    volumes:
+      - ./api:/var/www/api
+      - /var/www/api/vendor

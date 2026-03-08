@@ -1,0 +1,2 @@
+# All routes are configured using attributes in the controller
+# See src/Controller/APIController.php
