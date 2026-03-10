@@ -1,0 +1,13 @@
+require '/var/www/api/vendor/autoload.php';
+use Jyotish\Yoga\Type\Additional;
+use Jyotish\Base\Import\ArraySource;
+use Jyotish\Base\Data;
+require '/var/www/api/tests/unit/Yoga/Type/data/array-additional.php';
+foreach(['VipareetaRaja','DharmaKarmadhipati','NeechaBhangRaja'] as ){
+    =new ArraySource(->);
+    =Data::createFromImport();
+    =new Additional();
+    ->setDataInstance();
+    ='has'.;
+    =->();
+    echo 

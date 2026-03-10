@@ -83,7 +83,7 @@ class Lib
         );
     }
 
-    public function calculateNow($latitude = '35.708309', $longitude = '51.380730', $time_zone="+03:30")
+    public function calculateNow($latitude = '35.708309', $longitude = '51.380730', $time_zone="+03:30", $nesting = 2)
     {
         // $tz = $this->getNearestTimezone($latitude, $longitude);
         $now = new DateTime('now', new DateTimeZone($time_zone));
@@ -95,7 +95,14 @@ class Lib
         $sec = $now->format('s');
         $dst_hour = 0;
         $dst_min = 0;
-        $nesting = 2;
+        // allow caller to request deeper nesting (default 2 for mahadasha+antardasha)
+        $nesting = intval($nesting);
+        if ($nesting < 1) {
+            $nesting = 1;
+        }
+        if ($nesting > 6) {
+            $nesting = 6; // maximum supported by library
+        }
         $varga = ["D1", "D9"];
         $infolevel = [];
 
@@ -358,6 +365,7 @@ class Lib
                 Yoga::TYPE_PARIVARTHANA,
                 Yoga::TYPE_RAJA,
                 Yoga::TYPE_SANNYASA,
+                Yoga::TYPE_ADDITIONAL, // custom classical yogas
                 // Yoga::INTERPLAY_PARIVARTHANA,
                 // Yoga::INTERPLAY_CONJUNCT,
                 // Yoga::INTERPLAY_ASPECT

@@ -37,6 +37,12 @@ class Yoga
      * Sannyasa yoga (combinations for ascetic)
      */
     const TYPE_SANNYASA = 'sannyasa';
+    /**
+     * Additional classical yogas not covered by the core types.
+     * This will include Dharmakarmadhipati, Neecha‑Bhang, Vipareeta Raj,
+     * Gajakesari, Kemadruma, etc.
+     */
+    const TYPE_ADDITIONAL = 'additional';
     
     const INTERPLAY_PARIVARTHANA = 'parivarthana';
     const INTERPLAY_CONJUNCT = 'conjunct';
@@ -54,6 +60,7 @@ class Yoga
         self::TYPE_PARIVARTHANA,
         self::TYPE_RAJA,
         self::TYPE_SANNYASA,
+        self::TYPE_ADDITIONAL, // extra yogas from documentation
     ];
     
     /**

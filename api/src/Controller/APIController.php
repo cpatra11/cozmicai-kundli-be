@@ -248,12 +248,147 @@ class APIController extends AbstractController
 
             return $this->json([
                 'error' => 'An internal error occurred',
+                'details' => $e->getMessage(),
             ], 500);
         }
+        // close calculate method
     }
 
     /**
-     * @Route("/api/now", name="now", methods={"GET"})
+     * @Route("/api/transit-chart", name="transit_chart", methods={"POST"})
+     */
+    public function transitChart(Request $request): JsonResponse
+    {
+        $this->logger->info('Transit chart endpoint accessed');
+        $startTime = microtime(true);
+
+        try {
+            $data = json_decode($request->getContent(), true);
+            if (!is_array($data)) {
+                throw new ApiException(400, 'Invalid JSON body');
+            }
+
+            $required = ['latitude','longitude','year','month','day','hour','min','sec','time_zone'];
+            $missing = [];
+            foreach ($required as $p) {
+                if (!isset($data[$p])) {
+                    $missing[] = $p;
+                }
+            }
+            if (!empty($missing)) {
+                throw new ApiException(400, 'Missing natal parameters', ['missing' => $missing]);
+            }
+
+            $natalParams = [
+                'latitude' => $data['latitude'],
+                'longitude' => $data['longitude'],
+                'year' => $data['year'],
+                'month' => $data['month'],
+                'day' => $data['day'],
+                'hour' => $data['hour'],
+                'min' => $data['min'],
+                'sec' => $data['sec'],
+                'time_zone' => $data['time_zone'] ?? 'Asia/Tehran',
+                'dst_hour' => $data['dst_hour'] ?? 0,
+                'dst_min' => $data['dst_min'] ?? 0,
+                'nesting' => $data['nesting'] ?? 0,
+            ];
+            if (isset($data['varga'])) {
+                $natalParams['varga'] = is_array($data['varga']) ? $data['varga'] : array_map('trim', explode(',', $data['varga']));
+            }
+            if (isset($data['infolevel'])) {
+                $natalParams['infolevel'] = is_array($data['infolevel']) ? $data['infolevel'] : array_map('trim', explode(',', $data['infolevel']));
+            }
+
+            $natalChart = $this->chart->calculator($natalParams);
+
+            $transitRequired = ['t_year','t_month','t_day','t_hour','t_min','t_sec'];
+            $missingTransit = [];
+            foreach ($transitRequired as $p) {
+                if (!isset($data[$p])) {
+                    $missingTransit[] = $p;
+                }
+            }
+            if (!empty($missingTransit)) {
+                throw new ApiException(400, 'Missing transit parameters', ['missing' => $missingTransit]);
+            }
+
+            $tParams = [
+                'latitude' => $data['latitude'],
+                'longitude' => $data['longitude'],
+                'year' => $data['t_year'],
+                'month' => $data['t_month'],
+                'day' => $data['t_day'],
+                'hour' => $data['t_hour'],
+                'min' => $data['t_min'],
+                'sec' => $data['t_sec'],
+                'time_zone' => $data['time_zone'] ?? 'Asia/Tehran',
+                'dst_hour' => $data['dst_hour'] ?? 0,
+                'dst_min' => $data['dst_min'] ?? 0,
+                'nesting' => $data['nesting'] ?? 0,
+            ];
+            if (isset($natalParams['varga'])) {
+                $tParams['varga'] = $natalParams['varga'];
+            }
+            if (isset($natalParams['infolevel'])) {
+                $tParams['infolevel'] = $natalParams['infolevel'];
+            }
+
+            $transitChart = $this->chart->calculator($tParams);
+
+            if (isset($natalChart['bhava'][1]['rashi']) && isset($transitChart['lagna']['Lg']['rashi'])) {
+                $desired = $natalChart['bhava'][1]['rashi'];
+                $transitChart['lagna']['Lg']['rashi'] = $desired;
+                if (isset($transitChart['lagna']['Lg']['rashi_name'])) {
+                    $rashiNames = [
+                        'Aries','Taurus','Gemini','Cancer','Leo','Virgo',
+                        'Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces'
+                    ];
+                    $transitChart['lagna']['Lg']['rashi_name'] = $rashiNames[$desired-1] ?? $transitChart['lagna']['Lg']['rashi_name'];
+                }
+                if (isset($transitChart['bhava'][1])) {
+                    $transitChart['bhava'][1]['rashi'] = $desired;
+                }
+            }
+
+            $result = ['chart' => $natalChart];
+            $result['chart']['transit'] = $transitChart;
+
+            $endTime = microtime(true);
+            $duration = number_format($endTime - $startTime, 3);
+            $createdAt = (new \DateTime())->format('Y-m-d H:i:s');
+
+            $response = [
+                'chart' => $result['chart'],
+                'duration_of_response' => (float) $duration,
+                'created_at' => $createdAt,
+            ];
+
+            return $this->json($response);
+        } catch (ApiException $e) {
+            $this->logger->warning('API exception: ' . $e->getMessage(), [
+                'status_code' => $e->getStatusCode(),
+                'details' => $e->getDetails(),
+            ]);
+
+            return $this->json([
+                'error' => $e->getMessage(),
+                'details' => $e->getDetails(),
+            ], $e->getStatusCode());
+        } catch (\Exception $e) {
+            $this->logger->error('An error occurred: ' . $e->getMessage(), [
+                'exception' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return $this->json([
+                'error' => 'An internal error occurred',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+    /**
      * @OA\Get(
      *     path="/api/now",
      *     summary="Get current time astrological chart",
@@ -355,6 +490,7 @@ class APIController extends AbstractController
 
             return $this->json([
                 'error' => 'An internal error occurred',
+                'details' => $e->getMessage(),
             ], 500);
         }
     }

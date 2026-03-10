@@ -72,6 +72,10 @@ trait EnvironmentTrait
      */
     public function isAspectedByGraha($options = null)
     {
+        // normalize options: earlier callers sometimes pass single graha key or string
+        if (!is_array($options)) {
+            $options = null;
+        }
         $isAspected = [];
         foreach (Graha::$graha as $key => $name) {
             $Graha = Graha::getInstance($key, $options);

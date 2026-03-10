@@ -130,6 +130,33 @@ Verifies if the API is running.
 GET /api/calculate
 ```
 
+This route performs a standard natal chart calculation.
+
+### Transit Chart
+
+```http
+POST /api/transit-chart
+```
+
+Accepts both natal and transit date/time parameters in the request body and
+returns an object containing the natal chart under `chart.natal` and the
+transit chart under `chart.transit`.
+
+For convenience the API now enforces that the transit chart's lagna rashi
+matches the rashi of house 1 – the "real transit ascendant zodiac" is
+always identical to the lagna zodiac.
+
+**Request body fields** (all values string or numeric):
+
+- latitude, longitude, time_zone, dst_hour, dst_min, nesting, varga,
+  infolevel (same as `/api/calculate`)
+- year, month, day, hour, min, sec – natal birth time
+- t_year, t_month, t_day, t_hour, t_min, t_sec – transit time (usually now)
+
+The response structure resembles the examples in the tests file above,
+with both charts provided.
+
+
 Calculates chart based on provided parameters.
 
 
@@ -496,8 +523,19 @@ Incorrect: ~~1:00~~, ~~+1:00~~, ~~1:0~~, ~~-1:0~~, ~~1~~, ~~+1~~, ~~-1~~
   "created_at": "2025-02-08 23:55:46"
 }
 
-```
 
+### Now API enhancements
+
+- Natal chart calculation (`/api/calculate`) now requests nesting up to 5
+  (`nesting=5` in the query string).  This returns mahadasha, antardasha,
+  pratyantardasha, sookshmantardasha and *pranantardasha* periods (prana dasha).
+  Attempting level 6 (deha dasha) was causing backend memory exhaustion, so we
+  limit to five levels by default.  You can still call the API with a higher
+  nesting value manually if your server has sufficient memory.- Added optional `nesting` query parameter (1–6) to `/api/now`.  Controls the
+  depth of dasha periods returned (1=mahadasha only, 2=mahadasha+antardasha,
+  etc).  Defaults to 2 for performance.
+- `Lib::calculateNow()` now accepts a fourth `$nesting` argument and sanitises
+  it to the supported range.
 ### Current Time Chart
 
 ```http
