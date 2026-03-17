@@ -28,6 +28,14 @@ class Swetest extends AbstractGanita
         'sweph'     => null,
     ];
 
+    /**
+     * Node mode for Rahu/Ketu calculation: mean or true.
+     * Many applications default to mean node, so we align to mean by default.
+     *
+     * @var string
+     */
+    protected $nodeType = 'mean';
+
     protected $inputAyanamsha = [
         Ayanamsha::AYANAMSHA_FAGAN => '0',
         Ayanamsha::AYANAMSHA_LAHIRI => '1',
@@ -49,7 +57,7 @@ class Swetest extends AbstractGanita
         Graha::KEY_GU => '5',
         Graha::KEY_SK => '3',
         Graha::KEY_SA => '6',
-        Graha::KEY_RA => 't',
+        Graha::KEY_RA => 'm',
     ];
 
     protected $outputPlanets = [
@@ -60,8 +68,22 @@ class Swetest extends AbstractGanita
         'Jupiter'  => Graha::KEY_GU,
         'Venus'    => Graha::KEY_SK,
         'Saturn'   => Graha::KEY_SA,
+        'meanNode' => Graha::KEY_RA,
         'trueNode' => Graha::KEY_RA,
     ];
+
+    /**
+     * Set Rahu node mode.
+     *
+     * @param string $nodeType Allowed values: mean, true
+     * @return $this
+     */
+    public function setNodeType($nodeType)
+    {
+        $nodeType = strtolower((string) $nodeType);
+        $this->nodeType = $nodeType === 'true' ? 'true' : 'mean';
+        return $this;
+    }
     
     protected $outputHouses = [
         'house1'   => 1,
@@ -114,6 +136,9 @@ class Swetest extends AbstractGanita
     public function getParams(array $params = null, array $options = null)
     {
         $this->setOptions($options);
+
+        // set swetest node flag dynamically: m = mean node, t = true node
+        $this->inputPlanets[Graha::KEY_RA] = $this->nodeType === 'true' ? 't' : 'm';
 
         $DateTime = clone($this->Data->getDateTime());
         $DateTime->setTimezone(new DateTimeZone('UTC'));
@@ -168,6 +193,9 @@ class Swetest extends AbstractGanita
     public function getRising($graha = Graha::KEY_SY, array $options = null)
     {
         $this->setOptions($options);
+
+        // keep rising calculations consistent with configured node mode
+        $this->inputPlanets[Graha::KEY_RA] = $this->nodeType === 'true' ? 't' : 'm';
         
         $DateTime = clone($this->Data->getDateTime());
         $DateTime->setTimezone(new DateTimeZone('UTC'));

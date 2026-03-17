@@ -49,7 +49,7 @@ class D4 extends AbstractVarga
     public function getVargaRashi(array $ganitaRashi)
     {
         $amshaSize = 30 / $this->vargaAmsha;
-        $result = Math::partsToUnits($ganitaRashi['degree'], $amshaSize, 'floor');
+        $result = $this->getAmshaResult($ganitaRashi['degree'], $amshaSize);
         
         $vargaRashi = [];
         $vargaRashi['degree'] = $result['parts'] * 30 / $amshaSize;

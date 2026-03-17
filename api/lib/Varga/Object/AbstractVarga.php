@@ -49,6 +49,35 @@ abstract class AbstractVarga
     abstract protected function getVargaRashi(array $ganitaRashi);
 
     /**
+     * Convert sign-degree into amsha unit index with a tiny epsilon guard.
+     *
+     * This prevents boundary jitter (e.g., 2.999999999999 vs 3.000000000001)
+     * from moving a graha one varga segment forward unexpectedly.
+     *
+     * @param float|int|string $degree Degree inside sign (0 <= degree < 30)
+     * @param float $amshaSize Size of one amsha segment
+     * @return array{units:int,parts:float}
+     */
+    protected function getAmshaResult($degree, $amshaSize)
+    {
+        $deg = (float) $degree;
+
+        // normalize into [0, 30)
+        $deg = fmod($deg, 30.0);
+        if ($deg < 0) {
+            $deg += 30.0;
+        }
+
+        // epsilon to keep exact/near boundaries from drifting to next segment
+        $epsilon = 1e-9;
+        if ($deg >= $epsilon) {
+            $deg -= $epsilon;
+        }
+
+        return Math::partsToUnits($deg, $amshaSize, 'floor');
+    }
+
+    /**
      * Get varga data.
      * 
      * @return array
@@ -58,10 +87,27 @@ abstract class AbstractVarga
         $vargaData = [];
 
         if ($this->vargaKey == Varga::KEY_D1) {
-            return $this->getData(\Jyotish\Base\Data::listBlock('main'));
+            $vargaData = $this->getData(\Jyotish\Base\Data::listBlock('main'));
+
+            $ascRashi = isset($vargaData['lagna']['Lg']['rashi'])
+                ? (int) $vargaData['lagna']['Lg']['rashi']
+                : 1;
+
+            if (isset($vargaData['graha']) && is_array($vargaData['graha'])) {
+                foreach ($vargaData['graha'] as $k => $v) {
+                    if (!isset($vargaData['graha'][$k]['rashi'])) {
+                        continue;
+                    }
+                    $grahaRashi = (int) $vargaData['graha'][$k]['rashi'];
+                    $vargaData['graha'][$k]['house_number'] = (($grahaRashi - $ascRashi + 12) % 12) + 1;
+                }
+            }
+
+            return $vargaData;
         }
 
         $bhava1Varga = $this->getVargaRashi($this->getData()['bhava'][1]);
+        $ascRashi = (int) $bhava1Varga['rashi'];
         foreach ($this->getData()['bhava'] as $k => $v) {
             $rashi = $k == 1 ? $bhava1Varga['rashi'] : Math::numberNext($rashi);
             $vargaData['bhava'][$k] = [
@@ -73,10 +119,12 @@ abstract class AbstractVarga
         
         foreach ($this->getData()['graha'] as $k => $v) {
             $result = $this->getVargaRashi($v);
+            $houseNumber = (($result['rashi'] - $ascRashi + 12) % 12) + 1;
             $vargaData['graha'][$k] = [
                 'rashi' => $result['rashi'],
                 'degree' => $result['degree'],
                 'speed' => $this->getData()['graha'][$k]['speed'],
+                'house_number' => $houseNumber,
                 'longitude' => 30 * ($result['rashi'] - 1) + $result['degree'],
             ];
         }

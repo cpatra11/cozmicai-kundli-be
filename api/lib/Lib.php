@@ -64,6 +64,8 @@ class Lib
         $nesting = $params['nesting'] ?? 0;
         $varga = $params['varga'] ?? ["D1"];
         $infolevel = $params['infolevel'] ?? [];
+        $ayanamsha = $params['ayanamsha'] ?? null;
+        $node_type = $params['node_type'] ?? 'mean';
         
         return $this->calculateChart(
             $latitude,
@@ -79,13 +81,21 @@ class Lib
             $dst_min,
             $varga,
             $nesting,
-            $infolevel
+            $infolevel,
+            $ayanamsha,
+            $node_type
         );
     }
 
-    public function calculateNow($latitude = '35.708309', $longitude = '51.380730', $time_zone="+03:30", $nesting = 2)
+    public function calculateNow($latitude, $longitude, $time_zone, $nesting = 2)
     {
-        // $tz = $this->getNearestTimezone($latitude, $longitude);
+        if (!is_numeric($latitude) || !is_numeric($longitude)) {
+            throw new \InvalidArgumentException('Latitude and longitude must be numeric.');
+        }
+        if (!is_string($time_zone) || trim($time_zone) === '') {
+            throw new \InvalidArgumentException('Timezone is required.');
+        }
+
         $now = new DateTime('now', new DateTimeZone($time_zone));
         $year = $now->format('Y');
         $month = $now->format('m');
@@ -247,7 +257,9 @@ class Lib
             "D60",
         ],
         $nesting = 4,
-        array $infolevel = ["basic", "ashtakavarga", "grahabala", "rashibala", "yogas", "panchanga", "transit"]
+        array $infolevel = ["basic", "ashtakavarga", "grahabala", "rashibala", "yogas", "panchanga", "transit"],
+        $ayanamsha = null,
+        $node_type = 'mean'
     ) {
 
         $locality = new Locality([
@@ -270,6 +282,7 @@ class Lib
 
         # setup ephemeris and calculations
         $ganita = new Swetest(["swetest" => SWETEST_PATH]);
+        $ganita->setNodeType($node_type);
         $data = new Data($date, $locality, $ganita);
         $data->calcVargaData($vargas);
         $data->calcParams();
@@ -283,6 +296,17 @@ class Lib
         $analysis = new Analysis($data);
         $vargaData = $analysis->getVargaData('D1');
 
+        // Ensure D1 includes authoritative house_number values for every graha.
+        // This prevents frontend recomputation drift (important for varga-derived charts).
+        $mainAsc = $vargaData['lagna']['Lg']['rashi'] ?? ($vargaData['user']['rashi'] ?? 1);
+        if (isset($vargaData['graha']) && is_array($vargaData['graha'])) {
+            foreach ($vargaData['graha'] as $grahaKey => $grahaVal) {
+                if (!isset($grahaVal['house_number'])) {
+                    $sign = $grahaVal['rashi'] ?? 1;
+                    $vargaData['graha'][$grahaKey]['house_number'] = ((int)$sign - (int)$mainAsc + 12) % 12 + 1;
+                }
+            }
+        }
 
         if (in_array('ashtakavarga', $infolevel)) {
             // AshtakaVarga calculation
@@ -292,7 +316,12 @@ class Lib
         }
 
         if (in_array('ayanamsa', $infolevel)) {
-            $vargaData['ayanamsa'] = Ayanamsha::getAyanamsha();
+            // if caller provided an ayanamsha method use it, otherwise rely on default
+            if ($ayanamsha) {
+                $vargaData['ayanamsa'] = Ayanamsha::getAyanamsha($date, $ayanamsha);
+            } else {
+                $vargaData['ayanamsa'] = Ayanamsha::getAyanamsha();
+            }
         }
 
         if (in_array('grahabala', $infolevel)) {
@@ -373,6 +402,19 @@ class Lib
             $yogas = $data->getData(['yoga']);
             $vargaData['yogas'] = $yogas;
         }
+
+        // Ensure the response always includes varga blocks for D1 (and any requested divisional charts)
+        // so the frontend can reliably render them.
+        $backendVarga = $data->getData()['varga'] ?? [];
+        if (!isset($backendVarga['D1'])) {
+            $backendVarga['D1'] = [
+                'graha' => $vargaData['graha'],
+                'bhava' => $vargaData['bhava'],
+                'lagna' => $vargaData['lagna'],
+            ];
+        }
+        $vargaData['varga'] = $backendVarga;
+
         $graha = $vargaData['graha'];
         $bhava = $vargaData['bhava'];
 

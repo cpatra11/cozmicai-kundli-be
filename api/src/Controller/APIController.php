@@ -11,6 +11,8 @@ use Jyotish\Lib;
 use Psr\Log\LoggerInterface;
 use OpenApi\Annotations as OA;
 use App\Exception\ApiException;
+use App\Lib\Ashtakoota;
+use App\Lib\Compatibility;
 
 class APIController extends AbstractController
 {
@@ -44,6 +46,33 @@ class APIController extends AbstractController
         return $this->json([
             'pong' => "success",
         ], 200);
+    }
+
+    /**
+     * @Route("/api/nakshatras", name="nakshatras", methods={"GET"})
+     *
+     * @OA\Get(
+     *     path="/api/nakshatras",
+     *     summary="List Nakshatras (master reference)",
+     *     tags={"Reference"},
+     *     @OA\Response(response=200, description="Nakshatra list", @OA\JsonContent(type="array"))
+     * )
+     */
+    public function nakshatras(Request $request): JsonResponse
+    {
+        $file = __DIR__ . '/../../data/nakshatras.json';
+        if (!file_exists($file)) {
+            return $this->json(['error' => 'Nakshatra master data not found'], 500);
+        }
+        $json = file_get_contents($file);
+        if ($json === false) {
+            return $this->json(['error' => 'Failed to read nakshatra data'], 500);
+        }
+        $decoded = json_decode($json, true);
+        if (!is_array($decoded)) {
+            return $this->json(['error' => 'Invalid nakshatra JSON data'], 500);
+        }
+        return $this->json($decoded);
     }
 
     /**
@@ -152,6 +181,20 @@ class APIController extends AbstractController
      *     required=false,
      *     @OA\Schema(type="string", example="basic,panchanga,transit")
      * )
+     * @OA\Parameter(
+     *     name="ayanamsha",
+     *     in="query",
+     *     description="Ayanamsha method to use (e.g. Lahiri, Fagan, Raman)",
+     *     required=false,
+     *     @OA\Schema(type="string")
+     * )
+    * @OA\Parameter(
+    *     name="node_type",
+    *     in="query",
+    *     description="Node calculation mode: mean or true (default: mean)",
+    *     required=false,
+    *     @OA\Schema(type="string", enum={"mean","true"}, example="mean")
+    * )
      * @OA\Response(
      *     response=200,
      *     description="Successful chart calculation",
@@ -203,6 +246,10 @@ class APIController extends AbstractController
                 'dst_hour' => $request->query->get('dst_hour') ?? 0,
                 'dst_min' => $request->query->get('dst_min') ?? 0,
                 'nesting' => $request->query->get('nesting') ?? 0,
+                // optionally allow caller to specify ayanamsha method (accept common misspelling too)
+                'ayanamsha' => $request->query->get('ayanamsha') ?? $request->query->get('ayanamsa') ?? null,
+                // node_type controls Rahu/Ketu source (mean|true); default is mean for wider app parity
+                'node_type' => strtolower($request->query->get('node_type') ?? 'mean'),
             ];
             
             $params['varga'] = $request->query->has('varga') 
@@ -255,6 +302,85 @@ class APIController extends AbstractController
     }
 
     /**
+     * @Route("/api/compatibility", name="compatibility", methods={"GET"})
+     *
+     * @OA\Get(
+     *     path="/api/compatibility",
+     *     summary="Matchmaking compatibility using nakshatras and paadhams",
+     *     tags={"Match"},
+     *     @OA\Parameter(name="boy_nak", in="query", description="Boy birth star number (1-27)", required=false, @OA\Schema(type="integer", example=1)),
+     *     @OA\Parameter(name="boy_pad", in="query", description="Boy paadham number (1-4)", required=false, @OA\Schema(type="integer", example=1)),
+     *     @OA\Parameter(name="girl_nak", in="query", description="Girl birth star number (1-27)", required=false, @OA\Schema(type="integer", example=5)),
+     *     @OA\Parameter(name="girl_pad", in="query", description="Girl paadham number (1-4)", required=false, @OA\Schema(type="integer", example=2)),
+     *     @OA\Parameter(name="min_score", in="query", description="Minimum compatibility score to include", required=false, @OA\Schema(type="number", example=18.0)),
+     *     @OA\Parameter(name="mode", in="query", description="Scoring mode: rules (default) or csv (legacy)", required=false, @OA\Schema(type="string", example="rules")),
+     *     @OA\Parameter(name="check_mahendra", in="query", description="Filter for Mahendra porutham", required=false, @OA\Schema(type="boolean", example=true)),
+     *     @OA\Parameter(name="check_vedha", in="query", description="Filter for Vedha porutham", required=false, @OA\Schema(type="boolean", example=true)),
+     *     @OA\Parameter(name="check_rajju", in="query", description="Filter for Rajju porutham", required=false, @OA\Schema(type="boolean", example=true)),
+     *     @OA\Parameter(name="check_shreedheerga", in="query", description="Filter for Shree Dheerga porutham", required=false, @OA\Schema(type="boolean", example=true)),
+     *     @OA\Response(response=200, description="Compatibility results", @OA\JsonContent(type="object")),
+     *     @OA\Response(response=400, description="Validation error (invalid query parameters)", @OA\JsonContent(type="object"))
+     * )
+     */
+    public function compatibility(Request $request): JsonResponse
+    {
+        $this->logger->info('Compatibility endpoint accessed');
+
+        try {
+            $boyNak = $request->query->getInt('boy_nak');
+            $boyPad = $request->query->getInt('boy_pad');
+            $girlNak = $request->query->getInt('girl_nak');
+            $girlPad = $request->query->getInt('girl_pad');
+            $minScore = $request->query->has('min_score') ? floatval($request->query->get('min_score')) : null;
+            $mode = strtolower(trim($request->query->get('mode', 'rules')));
+
+
+            $flags = [
+                'mahendra' => filter_var($request->query->get('check_mahendra'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE),
+                'vedha' => filter_var($request->query->get('check_vedha'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE),
+                'rajju' => filter_var($request->query->get('check_rajju'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE),
+                'shreedheerga' => filter_var($request->query->get('check_shreedheerga'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE),
+            ];
+
+            $matches = Compatibility::match(
+                $boyNak ?: null,
+                $boyPad ?: null,
+                $girlNak ?: null,
+                $girlPad ?: null,
+                $minScore,
+                $flags,
+                $mode
+            );
+
+            return $this->json([
+                'matches' => $matches,
+                'count' => count($matches),
+            ]);
+        } catch (ApiException $e) {
+            $this->logger->warning('API exception: ' . $e->getMessage(), [
+                'status_code' => $e->getStatusCode(),
+                'details' => $e->getDetails(),
+            ]);
+
+            return $this->json([
+                'error' => $e->getMessage(),
+                'details' => $e->getDetails(),
+            ], $e->getStatusCode());
+        } catch (\Exception $e) {
+            $this->logger->error('An error occurred: ' . $e->getMessage(), [
+                'exception' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return $this->json([
+                'error' => 'An internal error occurred',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * @Route("/api/transit-chart", name="transit_chart", methods={"POST"})
      */
     public function transitChart(Request $request): JsonResponse
@@ -292,6 +418,9 @@ class APIController extends AbstractController
                 'dst_hour' => $data['dst_hour'] ?? 0,
                 'dst_min' => $data['dst_min'] ?? 0,
                 'nesting' => $data['nesting'] ?? 0,
+                // support either spelling from JSON body
+                'ayanamsha' => $data['ayanamsha'] ?? $data['ayanamsa'] ?? null,
+                'node_type' => strtolower($data['node_type'] ?? 'mean'),
             ];
             if (isset($data['varga'])) {
                 $natalParams['varga'] = is_array($data['varga']) ? $data['varga'] : array_map('trim', explode(',', $data['varga']));
@@ -326,6 +455,7 @@ class APIController extends AbstractController
                 'dst_hour' => $data['dst_hour'] ?? 0,
                 'dst_min' => $data['dst_min'] ?? 0,
                 'nesting' => $data['nesting'] ?? 0,
+                'node_type' => $natalParams['node_type'] ?? 'mean',
             ];
             if (isset($natalParams['varga'])) {
                 $tParams['varga'] = $natalParams['varga'];
@@ -441,13 +571,23 @@ class APIController extends AbstractController
         $startTime = microtime(true);
 
         try {
-            $defaultLatitude = 35.7219;
-            $defaultLongitude = 51.3347;
+            $requiredParams = ['latitude', 'longitude', 'time_zone'];
+            $missingParams = [];
 
-            $latitude = $request->query->get('latitude') ?? $defaultLatitude;
-            $longitude = $request->query->get('longitude') ?? $defaultLongitude;
-            $time_zone = $request->query->get('time_zone') ?? "+03:30";
-            
+            foreach ($requiredParams as $param) {
+                if (!$request->query->has($param)) {
+                    $missingParams[] = $param;
+                }
+            }
+
+            if (!empty($missingParams)) {
+                throw new ApiException(400, 'Missing required parameters', ['missing' => $missingParams]);
+            }
+
+            $latitude = $request->query->get('latitude');
+            $longitude = $request->query->get('longitude');
+            $time_zone = $request->query->get('time_zone');
+
             if (!is_numeric($latitude) || !is_numeric($longitude)) {
                 throw new ApiException(400, 'Invalid coordinates', [
                     'latitude' => $latitude,
