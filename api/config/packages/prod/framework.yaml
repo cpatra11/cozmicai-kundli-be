@@ -1,0 +1,39 @@
+# Production-specific framework configuration
+framework:
+    # Symfony cache for the application
+    cache:
+        default_redis_provider: 'redis://localhost:6379'
+        pools:
+            system:
+                adapter: cache.adapter.redis
+                default_lifetime: 3600
+                provider: 'redis://localhost:6379?timeout=5'
+            # Application cache pool (for chart results, etc.)
+            app:
+                adapter: cache.adapter.redis
+                default_lifetime: 86400  # 24 hours
+                provider: 'redis://localhost:6379?timeout=5'
+
+    # HTTP cache for reverse proxy / CDN
+    http_cache:
+        enabled: true
+        cache: cache.app
+
+    # Session handling (if needed)
+    session:
+        handler_id: null
+        cookie_secure: true      # Only send over HTTPS in prod
+        cookie_httponly: true    # Prevent JS access to session cookie
+        cookie_samesite: strict  # CSRF protection
+        gc_maxlifetime: 3600
+
+    # Error handling
+    error_controller: null  # Don't expose debug info
+    
+    # Request validation
+    http_method_override: false
+
+    # PHP errors
+    php_errors:
+        log: true
+        level: warning

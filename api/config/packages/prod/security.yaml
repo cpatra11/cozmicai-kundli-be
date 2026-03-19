@@ -1,0 +1,30 @@
+# Production security and CORS configuration
+# Reference: https://symfony.com/doc/current/security.html
+when@prod:
+    security:
+        enable_authenticator_manager: true
+        
+        firewalls:
+            api:
+                pattern: ^/api
+                stateless: true
+                # Require API key or token authentication here (implement based on your auth strategy)
+                # Option 1: API Key simple auth
+                # Option 2: JWT Bearer tokens
+                # Option 3: Service-to-service mTLS
+
+        # Disable unnecessary security features in prod
+        allow_eager_access_control_decision: true
+
+# CORS headers for API (adjust allowed origins as needed)
+nelmio_cors:
+    defaults:
+        allow_credentials: false
+        allow_origin: ['%env(CORS_ALLOW_ORIGIN)%']  # Set in deployment config
+        allow_headers: ['Content-Type', 'Authorization']
+        allow_methods: ['GET', 'POST', 'OPTIONS']
+        max_age: 3600
+        expose_headers: ['X-Request-ID']
+    paths:
+        '^/api/':
+            allow_origin: ['%env(CORS_ALLOW_ORIGIN)%']

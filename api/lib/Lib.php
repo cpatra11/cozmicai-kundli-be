@@ -19,8 +19,7 @@ use Jyotish\Yoga\Yoga;
 use Jyotish\Bala\AshtakaVarga;
 use Jyotish\Bala\GrahaBala;
 use Jyotish\Bala\RashiBala;
-use Jyotish\Graha\Graha;
-use Carbon\Carbon;
+use Jyotish\Graha\Graha;use Jyotish\Graha\Upagraha;use Jyotish\Bhava\Arudha;use Carbon\Carbon;
 
 use \Datetime;
 use \DateTimeZone;
@@ -292,6 +291,13 @@ class Lib
             $data->calcHora();
             $data->calcHora(Hora::TYPE_YAMA);
         }
+
+        if (in_array('upagraha', $infolevel)) {
+            $data->calcUpagraha();
+        }
+
+        // Always calculate Arudha (Bhava Arudha) so frontend can display an Arudha chart.
+        $data->calcBhavaArudha();
         
         $analysis = new Analysis($data);
         $vargaData = $analysis->getVargaData('D1');
@@ -306,6 +312,67 @@ class Lib
                     $vargaData['graha'][$grahaKey]['house_number'] = ((int)$sign - (int)$mainAsc + 12) % 12 + 1;
                 }
             }
+        }
+
+        // Convert upagraha object to an array format expected by the frontend.
+        if (isset($vargaData['upagraha']) && is_array($vargaData['upagraha'])) {
+            $sunKeys = [Upagraha::KEY_DH, Upagraha::KEY_VY, Upagraha::KEY_PA, Upagraha::KEY_IN, Upagraha::KEY_UK];
+            $items = [];
+            foreach ($vargaData['upagraha'] as $key => $value) {
+                $name = Upagraha::$upagraha[$key] ?? $key;
+                $type = in_array($key, $sunKeys, true) ? 'sun-derived' : 'time-based';
+                $isMalefic = !in_array($key, [Upagraha::KEY_YA], true); // Yamaghantaka is generally benefic
+
+                $houseNumber = $value['house_number'] ?? null;
+                if ($houseNumber === null && isset($value['rashi'])) {
+                    $houseNumber = ((int)$value['rashi'] - (int)$mainAsc + 12) % 12 + 1;
+                }
+
+                $items[] = [
+                    'key' => $key,
+                    'name' => $name,
+                    'type' => $type,
+                    'longitude' => $value['longitude'] ?? null,
+                    'sign' => $value['rashi'] ?? null,
+                    'house' => $houseNumber,
+                    'degree' => $value['degree'] ?? null,
+                    'isMalefic' => $isMalefic,
+                    // Keep original keys for backwards compatibility
+                    'house_number' => $houseNumber,
+                    'rashi' => $value['rashi'] ?? null,
+                ];
+            }
+            $vargaData['upagrahas'] = $items;
+        }
+
+        // Convert arudha object to an array format expected by the frontend.
+        // This runs unconditionally so the frontend can show the Arudha chart when requested.
+        if (isset($data->getData()[Data::BLOCK_LAGNA])) {
+            $arudhaData = $data->getData()[Data::BLOCK_LAGNA];
+            $items = [];
+            foreach (Arudha::$arudha as $key => $name) {
+                if (!isset($arudhaData[$key]) || !is_array($arudhaData[$key])) {
+                    continue;
+                }
+
+                $value = $arudhaData[$key];
+                $houseNumber = $value['house_number'] ?? null;
+                if ($houseNumber === null && isset($value['rashi'])) {
+                    $houseNumber = ((int)$value['rashi'] - (int)$mainAsc + 12) % 12 + 1;
+                }
+
+                $items[] = [
+                    'key' => $key,
+                    'name' => $name,
+                    'longitude' => $value['longitude'] ?? null,
+                    'sign' => $value['rashi'] ?? null,
+                    'house' => $houseNumber,
+                    'degree' => $value['degree'] ?? null,
+                    'house_number' => $houseNumber,
+                    'rashi' => $value['rashi'] ?? null,
+                ];
+            }
+            $vargaData['arudha'] = $items;
         }
 
         if (in_array('ashtakavarga', $infolevel)) {

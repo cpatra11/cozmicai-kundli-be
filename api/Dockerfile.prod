@@ -1,0 +1,231 @@
+# Multi-stage production Dockerfile for Be-1 Jyotish API
+# Stage 1: Builder (compile swetest, install deps)
+FROM ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV COMPOSER_ALLOW_SUPERUSER=1
+
+WORKDIR /build
+
+# Install build dependencies only (will be removed in final image)
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+    git \
+    unzip \
+    libzip-dev \
+    libicu-dev \
+    libonig-dev \
+    libpng-dev \
+    curl \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    g++ \
+    make \
+    php-cli \
+    php-common \
+    php-xml \
+    php-mbstring \
+    php-curl \
+    php-zip \
+    php-intl \
+    composer && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy composer files
+COPY composer.json composer.lock ./
+
+# Install composer dependencies with optimizations
+RUN composer install \
+    --no-dev \
+    --optimize-autoloader \
+    --no-interaction \
+    --no-scripts && \
+    composer clear-cache
+
+# Copy application code
+COPY . .
+
+# Compile swetest binary (optimized for production)
+RUN cd swetest/src && \
+    make clean && \
+    make swetest CFLAGS="-O2 -march=native" && \
+    chmod +x swetest && \
+    strip swetest
+
+# Create cache/log dirs
+RUN mkdir -p var/cache var/log && \
+    chmod 777 var/cache var/log
+
+# ---
+# Stage 2: Runtime (minimal, production image)
+FROM ubuntu:22.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV APP_ENV=prod
+ENV COMPOSER_ALLOW_SUPERUSER=1
+
+WORKDIR /var/www/api
+
+# Install ONLY runtime dependencies (no build tools)
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+    nginx \
+    php8.1-fpm \
+    php8.1-common \
+    php8.1-mysql \
+    php8.1-xml \
+    php8.1-mbstring \
+    php8.1-curl \
+    php8.1-zip \
+    php8.1-gd \
+    php8.1-intl \
+    php8.1-bcmath \
+    php8.1-soap \
+    php8.1-opcache \
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
+
+# Copy built artifacts from builder stage
+COPY --from=builder --chown=www-data:www-data /build /var/www/api
+
+# ===== OPcache Configuration (Performance Critical) =====
+RUN echo ' \
+opcache.enable=1 \n\
+opcache.memory_consumption=256 \n\
+opcache.interned_strings_buffer=16 \n\
+opcache.max_accelerated_files=20000 \n\
+opcache.validate_timestamps=0 \n\
+opcache.revalidate_freq=0 \n\
+opcache.fast_shutdown=1 \n\
+opcache.enable_file_override=1 \n\
+opcache.optimization_level=0x7FFEBFFF \n\
+' >> /etc/php/8.1/mods-available/opcache.ini
+
+# ===== PHP-FPM Configuration (Scalability) =====
+# pm.max_children tuned for 512MB memory + AWS Lambda-like constraints
+RUN sed -i 's/^pm = .*/pm = dynamic/' /etc/php/8.1/fpm/pool.d/www.conf && \
+    sed -i 's/^pm.max_children = .*/pm.max_children = 50/' /etc/php/8.1/fpm/pool.d/www.conf && \
+    sed -i 's/^pm.start_servers = .*/pm.start_servers = 20/' /etc/php/8.1/fpm/pool.d/www.conf && \
+    sed -i 's/^pm.min_spare_servers = .*/pm.min_spare_servers = 10/' /etc/php/8.1/fpm/pool.d/www.conf && \
+    sed -i 's/^pm.max_spare_servers = .*/pm.max_spare_servers = 30/' /etc/php/8.1/fpm/pool.d/www.conf && \
+    sed -i 's/^pm.max_requests = .*/pm.max_requests = 500/' /etc/php/8.1/fpm/pool.d/www.conf && \
+    sed -i 's/^request_terminate_timeout = .*/request_terminate_timeout = 120/' /etc/php/8.1/fpm/pool.d/www.conf && \
+    sed -i 's/listen = .*/listen = 127.0.0.1:9000/' /etc/php/8.1/fpm/pool.d/www.conf
+
+# PHP error logging
+RUN sed -i 's/;error_log = php_errors.log/error_log = \/proc\/self\/fd\/2/' /etc/php/8.1/fpm/php-fpm.conf && \
+    sed -i 's/;catch_workers_output = yes/catch_workers_output = yes/' /etc/php/8.1/fpm/pool.d/www.conf
+
+# PHP CLI settings for production
+RUN echo ' \
+max_execution_time=120 \n\
+memory_limit=256M \n\
+default_charset=UTF-8 \n\
+' >> /etc/php/8.1/cli/conf.d/99-production.ini
+
+# ===== Nginx Configuration (Security + Performance) =====
+RUN mkdir -p /etc/nginx/conf.d && \
+    echo ' \
+server { \
+    listen 8080 default_server; \
+    listen [::]:8080 default_server; \
+    root /var/www/api/public; \
+    index index.php; \
+    server_name _; \
+    \
+    # Security Headers \
+    add_header X-Frame-Options "SAMEORIGIN" always; \
+    add_header X-Content-Type-Options "nosniff" always; \
+    add_header X-XSS-Protection "1; mode=block" always; \
+    add_header Referrer-Policy "no-referrer-when-downgrade" always; \
+    add_header Content-Security-Policy "default-src '"'"'self'"'"'; script-src '"'"'self'"'"'; style-src '"'"'self'"'"' '"'"'unsafe-inline'"'"'" always; \
+    \
+    # Health check endpoint (should return 200 quickly) \
+    location = /health { \
+        access_log off; \
+        return 200 "healthy\n"; \
+        add_header Content-Type text/plain; \
+    } \
+    \
+    # API endpoints \
+    location / { \
+        try_files $uri $uri/ /index.php?$query_string; \
+    } \
+    \
+    location ~ \.php$ { \
+        fastcgi_pass 127.0.0.1:9000; \
+        fastcgi_index index.php; \
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name; \
+        fastcgi_param APP_ENV prod; \
+        include fastcgi_params; \
+        \
+        # Timeouts for long-running calculations \
+        fastcgi_read_timeout 120; \
+        fastcgi_connect_timeout 10; \
+    } \
+    \
+    # Deny access to sensitive files \
+    location ~ /\. { \
+        deny all; \
+        access_log off; \
+        log_not_found off; \
+    } \
+    \
+    location ~ ~$ { \
+        deny all; \
+        access_log off; \
+        log_not_found off; \
+    } \
+} \
+' > /etc/nginx/sites-available/default && \
+    ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+
+# Remove default Nginx config
+RUN rm -f /etc/nginx/sites-enabled/default.bak
+
+# Setup log directories
+RUN mkdir -p /var/log/nginx /var/log/php8.1-fpm && \
+    chown -R www-data:www-data /var/log/nginx /var/log/php8.1-fpm /var/www/api/var
+
+# Create non-root user for app execution (already www-data, but ensure permissions)
+RUN usermod -d /var/www/api www-data
+
+# Make swetest executable by www-data
+RUN chmod +x /var/www/api/swetest/src/swetest && \
+    chown www-data:www-data /var/www/api/swetest/src/swetest
+
+# Warm up Symfony cache in production mode (requires APP_ENV)
+RUN APP_ENV=prod php bin/console cache:warmup --env=prod || true
+
+# Install assets
+RUN php bin/console assets:install --env=prod || true
+
+# Expose port
+EXPOSE 8080
+
+# Health check (Docker/ECS/K8s will use this)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Start as non-root (www-data)
+USER www-data
+
+# Entrypoint script for robust startup
+RUN echo '#!/bin/bash \n\
+set -e \n\
+\n\
+# Start PHP-FPM in background (runs as www-data) \n\
+php-fpm8.1 --nodaemonize --fpm-config /etc/php/8.1/fpm/php-fpm.conf & \n\
+PHP_FPM_PID=$! \n\
+\n\
+# Start Nginx in foreground (user www-data cannot bind to port 8080 directly, so run as root via sudo or use unprivileged port) \n\
+exec nginx -g "daemon off;" \n\
+' > /tmp/start.sh && chmod +x /tmp/start.sh
+
+# Run as root to start services, then switch to www-data via PHP-FPM
+USER root
+
+CMD ["/bin/bash", "-c", "service php8.1-fpm start && nginx -g 'daemon off;'"]

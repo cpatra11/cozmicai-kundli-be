@@ -8,6 +8,7 @@ namespace Jyotish\Bhava;
 
 use Jyotish\Bhava\Bhava;
 use Jyotish\Ganita\Math;
+use Jyotish\Graha\Graha;
 
 /**
  * Arudha class.
@@ -140,35 +141,51 @@ class Arudha
         $Bhava = Bhava::getInstance($bhavaKey)->setEnvironment($this->Data);
         $bhavaRuler = $Bhava->getRuler();
 
+        // Handle dual-lord signs (Scorpio and Aquarius) using a default lord.
+        // See arudha.md: Scorpio is generally treated as Mars-ruled and Aquarius as Saturn-ruled.
+        $bhavaSign = $this->getData()['bhava'][$bhavaKey]['rashi'] ?? null;
+        if ($bhavaSign === 8) { // Scorpio
+            $bhavaRuler = Graha::KEY_MA;
+        } elseif ($bhavaSign === 11) { // Aquarius
+            $bhavaRuler = Graha::KEY_SA;
+        }
+
         $lngRuler = $this->getData()['graha'][$bhavaRuler]['longitude'];
         $lngBhava = $this->getData()['bhava'][$bhavaKey]['longitude'];
 
-        $lngDiff = $lngRuler - $lngBhava;
-        $lngArudha = $lngRuler + $lngDiff;
-        
-        if ($lngArudha >= 360) {
-            $lngArudha = $lngArudha - 360;
-        } elseif ($lngArudha < 0) {
-            $lngArudha = 360 + $lngArudha;
+        $bhavaSign = Math::partsToUnits($lngBhava)['units'];
+        $rulerSign = Math::partsToUnits($lngRuler)['units'];
+
+        // Count signs from bhava sign to ruler sign inclusive (D)
+        $diff = ($rulerSign - $bhavaSign + 12) % 12;
+        $D = $diff + 1;
+
+        // Provisional Arudha sign
+        $provisionalSign = (($rulerSign - 1 + $D - 1) % 12) + 1;
+
+        // Determine if provisional is 1st or 7th from bhava.
+        // In those cases, the final Arudha is the 10th from the original bhava (per arudha.md).
+        $offsetFromBhava = ($provisionalSign - $bhavaSign + 12) % 12;
+        if ($this->optionUseException && ($offsetFromBhava === 0 || $offsetFromBhava === 6)) {
+            // 1st or 7th -> move to 10th from the bhava (not from the provisional)
+            $provisionalSign = (($bhavaSign - 1 + 9) % 12) + 1;
         }
 
-        $unitArudha = Math::partsToUnits($lngArudha);
-        $rashiArudha = $unitArudha['units'];
-        
-        if ($this->optionUseException) {
-            if (
-                Math::inRange($lngDiff, 0 - $this->optionExceptionRang, $this->optionExceptionRang) || 
-                Math::inRange(abs($lngDiff), 90 - $this->optionExceptionRang, 90 + $this->optionExceptionRang)
-            ) {
-                $rashiArudha = Math::numberInCycle($unitArudha['units'], 10);
-                $lngArudha = ($rashiArudha - 1) * 30 + $unitArudha['parts'];
-            }
+        // Use bhava's own intra-sign degree to represent the Arudha's degree.
+        $degree = Math::partsToUnits($lngBhava)['parts'];
+        $lngArudha = ($provisionalSign - 1) * 30 + $degree;
+
+        // normalize
+        if ($lngArudha >= 360) {
+            $lngArudha -= 360;
+        } elseif ($lngArudha < 0) {
+            $lngArudha += 360;
         }
-        
+
         return [
             'longitude' => $lngArudha,
-            'rashi' => $rashiArudha,
-            'degree' => $unitArudha['parts'],
+            'rashi' => $provisionalSign,
+            'degree' => $degree,
         ];
     }
     

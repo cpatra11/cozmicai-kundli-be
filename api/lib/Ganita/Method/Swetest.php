@@ -113,14 +113,21 @@ class Swetest extends AbstractGanita
             throw new Exception\InvalidArgumentException("Swe key 'swetest' is required and must be path to swetest app.");
         }
 
-        if (!file_exists($swe['swetest'])) {
-            throw new Exception\InvalidArgumentException("In the directory '{$swe['swetest']}' there is no swetest file.");
+        $swetestPath = rtrim($swe['swetest'], '/');
+
+        // Backward compatibility: allow passing either a directory path or full binary path.
+        if (is_dir($swetestPath)) {
+            $swetestPath .= '/swetest';
         }
 
-        $this->swe['swetest'] = $swe['swetest'];
+        if (!is_file($swetestPath)) {
+            throw new Exception\InvalidArgumentException("Swetest binary was not found at '{$swetestPath}'.");
+        }
+
+        $this->swe['swetest'] = $swetestPath;
 
         if (empty($swe['sweph'])) {
-            $this->swe['sweph'] = $swe['swetest'];
+            $this->swe['sweph'] = dirname($swetestPath);
         } else {
             $this->swe['sweph'] = $swe['sweph'];
         }
@@ -173,9 +180,10 @@ class Swetest extends AbstractGanita
             }
         }
 
-        $string = 'swetest'.$dir.$date.$time.$planets.$houses.$sid.' -fPlbsad -g, -head';
+        // Call the configured swetest binary directly (not relying on PATH).
+        $swetestCmd = escapeshellcmd($this->swe['swetest']);
+        $string = $swetestCmd.$dir.$date.$time.$planets.$houses.$sid.' -fPlbsad -g, -head';
 
-        putenv("PATH={$this->swe['swetest']}");
         exec($string, $out);
 
         $dataParams = $this->formatParams($out, $params);
@@ -208,9 +216,9 @@ class Swetest extends AbstractGanita
         $geopos	= ' -geopos'.$Locality->getLongitude().','.$Locality->getLatitude().',0';
         $rising = ' -'.$this->optionRising;
 
-        $string = 'swetest'.$dir.$date.$planet.$geopos.$rising.' -n5 -rise';
+        $swetestCmd = escapeshellcmd($this->swe['swetest']);
+        $string = $swetestCmd.$dir.$date.$planet.$geopos.$rising.' -n5 -rise';
 
-        putenv("PATH={$this->swe['swetest']}");
         exec($string, $out);
         
         $dataRising = $this->formatRising($out, $graha);

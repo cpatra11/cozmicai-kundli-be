@@ -1,0 +1,14 @@
+# Production-specific Symfony logging configuration
+# Logs are sent to CloudWatch via stdout/stderr
+monolog:
+    handlers:
+        main:
+            type: stream
+            path: php://stdout
+            level: info
+            formatter: monolog.formatter.json
+        error:
+            type: stream
+            path: php://stderr
+            level: error
+            formatter: monolog.formatter.json

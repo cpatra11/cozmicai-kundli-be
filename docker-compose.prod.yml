@@ -1,0 +1,55 @@
+# Docker Compose for local testing of production build
+# Usage: docker-compose -f docker-compose.prod.yml up
+version: '3.8'
+
+services:
+  jyotish_api_prod:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.prod
+    container_name: jyotish_api_prod
+    ports:
+      - "9394:8080"  # Different port from dev to avoid conflicts
+    environment:
+      APP_ENV: prod
+      CORS_ALLOW_ORIGIN: "http://localhost:3000"
+      SWETEST_PATH: /var/www/api/swetest/src
+    volumes:
+      # Optional: Mount logs for inspection (remove in production)
+      - ./logs/prod:/var/log
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - jyotish_prod
+    # Resource limits (similar to ECS settings)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Optional: Redis for caching (if you want to test with cache)
+  redis_prod:
+    image: redis:7-alpine
+    container_name: redis_prod
+    ports:
+      - "6380:6379"  # Different port from dev
+    command: redis-server --appendonly yes
+    networks:
+      - jyotish_prod
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  jyotish_prod:
+    driver: bridge
