@@ -39,6 +39,28 @@ class Lib
     public ?array $grahas = null;
     public ?array $lagnas = null;
 
+    /**
+     * Classical sign lords used for Arudha calculations.
+     *
+     * Scorpio (8) and Aquarius (11) can have co-lords handled separately.
+     *
+     * @var array<int,string>
+     */
+    private array $signLords = [
+        1 => Graha::KEY_MA,
+        2 => Graha::KEY_SK,
+        3 => Graha::KEY_BU,
+        4 => Graha::KEY_CH,
+        5 => Graha::KEY_SY,
+        6 => Graha::KEY_BU,
+        7 => Graha::KEY_SK,
+        8 => Graha::KEY_MA,
+        9 => Graha::KEY_GU,
+        10 => Graha::KEY_SA,
+        11 => Graha::KEY_SA,
+        12 => Graha::KEY_GU,
+    ];
+
     public function __construct(){}
 
     
@@ -296,6 +318,8 @@ class Lib
         $analysis = new Analysis($data);
         $vargaData = $analysis->getVargaData('D1');
 
+        $arudhaData = [];
+
         // Ensure D1 includes authoritative house_number values for every graha.
         // This prevents frontend recomputation drift (important for varga-derived charts).
         $mainAsc = $vargaData['lagna']['Lg']['rashi'] ?? ($vargaData['user']['rashi'] ?? 1);
@@ -403,6 +427,16 @@ class Lib
             $vargaData['yogas'] = $yogas;
         }
 
+        if (in_array('arudha', $infolevel)) {
+            $arudhaData = $this->calculateArudhaPadas($vargaData);
+            if (!empty($arudhaData)) {
+                $vargaData['arudha'] = $arudhaData;
+                foreach ($arudhaData as $key => $point) {
+                    $vargaData['lagna'][$key] = $point;
+                }
+            }
+        }
+
         // Ensure the response always includes varga blocks for D1 (and any requested divisional charts)
         // so the frontend can reliably render them.
         $backendVarga = $data->getData()['varga'] ?? [];
@@ -412,6 +446,12 @@ class Lib
                 'bhava' => $vargaData['bhava'],
                 'lagna' => $vargaData['lagna'],
             ];
+        }
+        if (!empty($arudhaData)) {
+            $backendVarga['D1']['arudha'] = $arudhaData;
+            foreach ($arudhaData as $key => $point) {
+                $backendVarga['D1']['lagna'][$key] = $point;
+            }
         }
         $vargaData['varga'] = $backendVarga;
 
@@ -432,5 +472,184 @@ class Lib
             $vargaData['houses'][$bhava_key]['graha'] = $bhava_grahas;
         }
         return $vargaData;
+    }
+
+    /**
+     * Calculate Arudha padas (AL, A2..A11, UL) using house sign/lord sign logic.
+     *
+     * Rule summary:
+     * - D = distance from house sign to lord sign (inclusive count, 1..12)
+     * - Provisional = lord sign + (D - 1)
+     * - Exception: if provisional is 1st or 7th from house sign,
+     *   shift to 10th or 4th from provisional respectively.
+     *
+     * @param array $chart
+     * @return array
+     */
+    private function calculateArudhaPadas(array $chart): array
+    {
+        if (!isset($chart['bhava']) || !is_array($chart['bhava']) || !isset($chart['graha']) || !is_array($chart['graha'])) {
+            return [];
+        }
+
+        $houseToKey = [
+            1 => 'AL',
+            2 => 'A2',
+            3 => 'A3',
+            4 => 'A4',
+            5 => 'A5',
+            6 => 'A6',
+            7 => 'A7',
+            8 => 'A8',
+            9 => 'A9',
+            10 => 'A10',
+            11 => 'A11',
+            12 => 'UL',
+        ];
+
+        $result = [];
+
+        foreach ($houseToKey as $house => $arudhaKey) {
+            $houseSign = (int) ($chart['bhava'][$house]['rashi'] ?? 0);
+            if ($houseSign < 1 || $houseSign > 12) {
+                continue;
+            }
+
+            $lord = $this->resolveArudhaLord($houseSign, $chart['graha']);
+            if (!$lord || !isset($chart['graha'][$lord])) {
+                continue;
+            }
+
+            $lordSign = (int) ($chart['graha'][$lord]['rashi'] ?? 0);
+            if ($lordSign < 1 || $lordSign > 12) {
+                continue;
+            }
+
+            $distance = $this->inclusiveSignDistance($houseSign, $lordSign);
+            $provisional = $this->addSigns($lordSign, $distance - 1);
+
+            $relative = $this->inclusiveSignDistance($houseSign, $provisional);
+            $finalSign = $provisional;
+
+            if ($relative === 1) {
+                // invalid at same sign from source -> move to 10th from provisional
+                $finalSign = $this->addSigns($provisional, 9);
+            } elseif ($relative === 7) {
+                // invalid at 7th from source -> move to 4th from provisional
+                $finalSign = $this->addSigns($provisional, 3);
+            }
+
+            $result[$arudhaKey] = [
+                'longitude' => (float) (($finalSign - 1) * 30),
+                'rashi' => $finalSign,
+                'degree' => 0.0,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Resolve house lord with dual-lord handling for Scorpio/Aquarius.
+     *
+     * @param int $sign
+     * @param array $graha
+     * @return string|null
+     */
+    private function resolveArudhaLord(int $sign, array $graha): ?string
+    {
+        if ($sign === 8) {
+            return $this->pickStrongerLord([Graha::KEY_MA, Graha::KEY_KE], $graha, Graha::KEY_MA);
+        }
+        if ($sign === 11) {
+            return $this->pickStrongerLord([Graha::KEY_SA, Graha::KEY_RA], $graha, Graha::KEY_SA);
+        }
+
+        return $this->signLords[$sign] ?? null;
+    }
+
+    /**
+     * Pick stronger lord by dignity and degree. Falls back to classical lord.
+     *
+     * @param array<int,string> $candidates
+     * @param array $graha
+     * @param string $fallback
+     * @return string
+     */
+    private function pickStrongerLord(array $candidates, array $graha, string $fallback): string
+    {
+        $best = $fallback;
+        $bestScore = -INF;
+
+        foreach ($candidates as $planetKey) {
+            if (!isset($graha[$planetKey]) || !is_array($graha[$planetKey])) {
+                continue;
+            }
+            $score = $this->planetStrengthScore($graha[$planetKey]);
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $best = $planetKey;
+            }
+        }
+
+        return $best;
+    }
+
+    /**
+     * Heuristic strength score for dual-lord selection.
+     *
+     * @param array $planet
+     * @return float
+     */
+    private function planetStrengthScore(array $planet): float
+    {
+        $dignityRaw = strtolower((string) ($planet['rashiAvastha'] ?? ''));
+        $dignityScore = 15;
+        switch ($dignityRaw) {
+            case 'exalted':
+            case 'ucha':
+                $dignityScore = 60;
+                break;
+            case 'mool':
+            case 'moolatrikona':
+                $dignityScore = 50;
+                break;
+            case 'swa':
+            case 'own':
+                $dignityScore = 40;
+                break;
+            case 'friend':
+                $dignityScore = 30;
+                break;
+            case 'neutral':
+                $dignityScore = 20;
+                break;
+            case 'enemy':
+                $dignityScore = 10;
+                break;
+            case 'debilitated':
+            case 'neecha':
+                $dignityScore = 0;
+                break;
+        }
+
+        $degree = (float) ($planet['degree'] ?? 0.0);
+        return (float) ($dignityScore * 100 + $degree);
+    }
+
+    /**
+     * Inclusive cyclic sign distance (1..12).
+     */
+    private function inclusiveSignDistance(int $fromSign, int $toSign): int
+    {
+        return (($toSign - $fromSign + 12) % 12) + 1;
+    }
+
+    /**
+     * Add signs in 1..12 cycle.
+     */
+    private function addSigns(int $sign, int $offset): int
+    {
+        return (($sign - 1 + $offset) % 12) + 1;
     }
 }
