@@ -337,6 +337,7 @@ class Lib
             $ashtakaVarga = new AshtakaVarga($data);
             // $vargaData['ashtakavarga'] = $ashtakaVarga->getSarvAshtakavarga(true);
             $vargaData['ashtakavarga'] = $ashtakaVarga->getBhinnAshtakavarga();
+            $vargaData['ashtakavarga_labels'] = $ashtakaVarga->getRashiLabels();
         }
 
         if (in_array('ayanamsa', $infolevel)) {

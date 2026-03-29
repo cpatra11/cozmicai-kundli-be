@@ -19,6 +19,20 @@ class APIController extends AbstractController
     private LoggerInterface $logger;
     private Lib $chart;
 
+    private function requireInternalApiKey(Request $request): void
+    {
+        $expected = getenv('API_INTERNAL_KEY') ?: '';
+        if ($expected === '') {
+            // If key is not configured, keep behavior backwards compatible.
+            return;
+        }
+
+        $provided = $request->headers->get('X-Internal-Api-Key');
+        if (!is_string($provided) || $provided === '' || !hash_equals($expected, $provided)) {
+            throw new ApiException(401, 'Unauthorized internal API key');
+        }
+    }
+
     public function __construct(LoggerInterface $logger)
     {
         $this->logger = $logger;
@@ -216,6 +230,7 @@ class APIController extends AbstractController
      */
     public function calculate(Request $request): JsonResponse
     {
+        $this->requireInternalApiKey($request);
         $this->logger->info('Calculate chart endpoint accessed');
         $startTime = microtime(true);
 
@@ -324,6 +339,7 @@ class APIController extends AbstractController
      */
     public function compatibility(Request $request): JsonResponse
     {
+        $this->requireInternalApiKey($request);
         $this->logger->info('Compatibility endpoint accessed');
 
         try {
@@ -385,6 +401,7 @@ class APIController extends AbstractController
      */
     public function transitChart(Request $request): JsonResponse
     {
+        $this->requireInternalApiKey($request);
         $this->logger->info('Transit chart endpoint accessed');
         $startTime = microtime(true);
 
@@ -567,6 +584,7 @@ class APIController extends AbstractController
      */
     public function getNowChart(Request $request): JsonResponse
     {
+        $this->requireInternalApiKey($request);
         $this->logger->info('Get now chart endpoint accessed');
         $startTime = microtime(true);
 

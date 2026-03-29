@@ -211,6 +211,22 @@ class AshtakaVarga
     }
 
     /**
+     * Get display labels for the 12 rashis.
+     *
+     * @return array
+     */
+    public function getRashiLabels()
+    {
+        $labels = [];
+
+        for ($i = 1; $i <= 12; $i++) {
+            $labels[$i] = 'R'.$i;
+        }
+
+        return $labels;
+    }
+
+    /**
      * Constructor
      * 
      * @param \Jyotish\Base\Data $Data
