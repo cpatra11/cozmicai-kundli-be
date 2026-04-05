@@ -247,6 +247,21 @@ class APIController extends AbstractController
             if (!empty($missingParams)) {
                 throw new ApiException(400, 'Missing required parameters', ['missing' => $missingParams]);
             }
+
+            $nesting = $request->query->has('nesting') ? (int) $request->query->get('nesting') : 1;
+            if ($nesting < 1 || $nesting > 6) {
+                throw new ApiException(400, 'Invalid nesting value', ['nesting' => $nesting]);
+            }
+
+            $periodKey = $request->query->get('period_key');
+            if (is_string($periodKey)) {
+                $periodKey = trim($periodKey);
+                if ($periodKey === '') {
+                    $periodKey = null;
+                }
+            } else {
+                $periodKey = null;
+            }
             
             $params = [
                 'latitude' => $request->query->get('latitude'),
@@ -260,7 +275,8 @@ class APIController extends AbstractController
                 'time_zone' => $request->query->get('time_zone') ?? 'Asia/Tehran',
                 'dst_hour' => $request->query->get('dst_hour') ?? 0,
                 'dst_min' => $request->query->get('dst_min') ?? 0,
-                'nesting' => $request->query->get('nesting') ?? 0,
+                'nesting' => $nesting,
+                'period_key' => $periodKey,
                 // optionally allow caller to specify ayanamsha method (accept common misspelling too)
                 'ayanamsha' => $request->query->get('ayanamsha') ?? $request->query->get('ayanamsa') ?? null,
                 // node_type controls Rahu/Ketu source (mean|true); default is mean for wider app parity

@@ -442,6 +442,14 @@ class Data
      */
     public function calcUpagraha(array $upagrahaKeys = null)
     {
+        // Ensure we have required data for time-based upagraha calculations.
+        if (!isset($this->data[self::BLOCK_PANCHANGA])) {
+            $this->calcPanchanga();
+        }
+        if (!isset($this->data[self::BLOCK_RISING])) {
+            $this->calcRising();
+        }
+
         $Upagraha = new Upagraha($this);
         $generateUpagraha = $Upagraha->generateUpagraha($upagrahaKeys);
         

@@ -38,6 +38,30 @@ class Upagraha
      * Key of Upaketu
      */
     const KEY_UK = 'Uk';
+    /**
+     * Key of Kaala (Sun's portion)
+     */
+    const KEY_KAALA = 'Kaala';
+    /**
+     * Key of Mrityu (Mars's portion)
+     */
+    const KEY_MRITYU = 'Mrityu';
+    /**
+     * Key of Artha Praharaka (Mercury's portion)
+     */
+    const KEY_ARTHA_PRAHARAKA = 'ArthaPraharaka';
+    /**
+     * Key of Yamaghantaka (Jupiter's portion)
+     */
+    const KEY_YAMAGHANTAKA = 'YamaGhantaka';
+    /**
+     * Key of Gulika (Saturn's portion start)
+     */
+    const KEY_GULIKA = 'Gulika';
+    /**
+     * Key of Mandi (Saturn's portion end)
+     */
+    const KEY_MANDI = 'Mandi';
     
     /**
      * List of Upagrahas.
@@ -50,6 +74,12 @@ class Upagraha
         self::KEY_PA => 'Parivesha',
         self::KEY_IN => 'Indrachapa',
         self::KEY_UK => 'Upaketu',
+        self::KEY_KAALA => 'Kaala',
+        self::KEY_MRITYU => 'Mrityu',
+        self::KEY_ARTHA_PRAHARAKA => 'Artha Praharaka',
+        self::KEY_YAMAGHANTAKA => 'Yama Ghantaka',
+        self::KEY_GULIKA => 'Gulika',
+        self::KEY_MANDI => 'Mandi',
     ];
     
     /**
@@ -172,6 +202,281 @@ class Upagraha
         return $this->temp[self::KEY_UK];
     }
     
+    /**
+     * Common calc helper and ensures rising data is present.
+     *
+     * @return array
+     */
+    protected function getDataWithRising()
+    {
+        $data = $this->getData();
+        if (!isset($data['rising'])) {
+            $this->getDataInstance()->calcPanchanga();
+            $this->getDataInstance()->calcRising();
+            $data = $this->getData();
+        }
+        return $data;
+    }
+
+    /**
+     * Get time-based upagraha longitudes.
+     *
+     * @return array
+     */
+    protected function getTimeBasedUpagrahas()
+    {
+        if (!isset($this->temp['timeBased'])) {
+            $this->temp['timeBased'] = $this->calculateTimeBasedUpagrahas();
+        }
+        return $this->temp['timeBased'];
+    }
+
+    /**
+     * Calculate all time-based upagraha longitudes.
+     *
+     * @return array
+     */
+    protected function calculateTimeBasedUpagrahas()
+    {
+        $data = $this->getDataWithRising();
+        $dateTime = $this->getDataInstance()->getDateTime();
+        $timeZone = $dateTime->getTimezone();
+
+        $risingData = $data['rising'][Graha::KEY_SY] ?? [];
+        if (empty($risingData) || count($risingData) < 2) {
+            throw new \Exception('Unable to calculate time-based upagrahas: insufficient rising data');
+        }
+
+        $risingToday = new \DateTime($risingData[1]['rising'], $timeZone);
+        $settingToday = new \DateTime($risingData[1]['setting'], $timeZone);
+        $riseTomorrow = isset($risingData[2]) ? new \DateTime($risingData[2]['rising'], $timeZone) : null;
+        $settingYesterday = isset($risingData[0]) ? new \DateTime($risingData[0]['setting'], $timeZone) : null;
+
+        $isDayBirth = $dateTime > $risingToday && $dateTime < $settingToday;
+
+        if ($isDayBirth) {
+            $start = $risingToday;
+            $end = $settingToday;
+        } elseif ($dateTime > $settingToday && $riseTomorrow !== null) {
+            $start = $settingToday;
+            $end = $riseTomorrow;
+        } elseif ($settingYesterday !== null && $dateTime < $risingToday) {
+            $start = $settingYesterday;
+            $end = $risingToday;
+        } else {
+            // fallback: treat as day
+            $start = $risingToday;
+            $end = $settingToday;
+            $isDayBirth = true;
+        }
+
+        $duration = ($end->getTimestamp() - $start->getTimestamp()) / 60.0;
+        if ($duration <= 0) {
+            $duration = 24 * 60;
+        }
+
+        $weekday = (int) $dateTime->format('w'); // 0=Sunday
+        $lords = $isDayBirth ? $this->getPraharalords($weekday, 'day') : $this->getPraharalords($weekday, 'night');
+        $praharaLength = $duration / 8.0;
+
+        $ascendantLong = $data['lagna'][Lagna::KEY_LG]['longitude'] ?? 0;
+
+        $results = [];
+
+        $upagrahaLords = [
+            self::KEY_KAALA => Graha::KEY_SY,
+            self::KEY_MRITYU => Graha::KEY_MA,
+            self::KEY_ARTHA_PRAHARAKA => Graha::KEY_BU,
+            self::KEY_YAMAGHANTAKA => Graha::KEY_GU,
+        ];
+
+        foreach ($upagrahaLords as $upagrahaKey => $lordKey) {
+            $praharaIndex = array_search($lordKey, $lords, true);
+            if ($praharaIndex === false) {
+                continue;
+            }
+            $results[$upagrahaKey] = $this->longitudeAtTime($praharaIndex * $praharaLength, $ascendantLong, $duration);
+        }
+
+        $saturnIndex = array_search(Graha::KEY_SA, $lords, true);
+        if ($saturnIndex !== false) {
+            $saturnStart = $saturnIndex * $praharaLength;
+            $results[self::KEY_GULIKA] = $this->longitudeAtTime($saturnStart, $ascendantLong, $duration);
+            $results[self::KEY_MANDI] = $this->longitudeAtTime($saturnStart + $praharaLength, $ascendantLong, $duration);
+        }
+
+        return $results;
+    }
+
+    /**
+     * Get prahara lords for day or night.
+     *
+     * @param int $weekday
+     * @param string $period "day" or "night"
+     * @return array
+     */
+    protected function getPraharalords($weekday, $period)
+    {
+        $baseOrder = [
+            Graha::KEY_SY,
+            Graha::KEY_CH,
+            Graha::KEY_MA,
+            Graha::KEY_BU,
+            Graha::KEY_GU,
+            Graha::KEY_SK,
+            Graha::KEY_SA,
+        ];
+
+        $weekday = $weekday % 7;
+        $rotated = array_merge(array_slice($baseOrder, $weekday), array_slice($baseOrder, 0, $weekday));
+
+        if ($period === 'night') {
+            return array_merge(array_slice($rotated, 4), array_slice($rotated, 0, 4));
+        }
+
+        return $rotated;
+    }
+
+    /**
+     * Convert a time offset within day/night to longitude.
+     *
+     * @param float $minutesFromStart
+     * @param float $ascendantLong
+     * @param float $durationMinutes
+     * @return float
+     */
+    protected function longitudeAtTime($minutesFromStart, $ascendantLong, $durationMinutes)
+    {
+        if ($durationMinutes <= 0) {
+            return $ascendantLong;
+        }
+        $fraction = $minutesFromStart / $durationMinutes;
+        $longitude = $ascendantLong + ($fraction * 360.0);
+
+        while ($longitude >= 360.0) {
+            $longitude -= 360.0;
+        }
+        while ($longitude < 0.0) {
+            $longitude += 360.0;
+        }
+
+        return $longitude;
+    }
+
+    /**
+     * Get Kaala (time-based) upagraha.
+     *
+     * @return array
+     */
+    public function getKaala()
+    {
+        $this->checkData();
+
+        if (!isset($this->temp[self::KEY_KAALA])) {
+            $timeBased = $this->getTimeBasedUpagrahas();
+            $lng = $timeBased[self::KEY_KAALA] ?? 0;
+            $unit = Math::partsToUnits($lng);
+            $this->temp[self::KEY_KAALA] = ['longitude' => $lng, 'rashi' => $unit['units'], 'degree' => $unit['parts']];
+        }
+
+        return $this->temp[self::KEY_KAALA];
+    }
+
+    /**
+     * Get Mrityu (time-based) upagraha.
+     *
+     * @return array
+     */
+    public function getMrityu()
+    {
+        $this->checkData();
+
+        if (!isset($this->temp[self::KEY_MRITYU])) {
+            $timeBased = $this->getTimeBasedUpagrahas();
+            $lng = $timeBased[self::KEY_MRITYU] ?? 0;
+            $unit = Math::partsToUnits($lng);
+            $this->temp[self::KEY_MRITYU] = ['longitude' => $lng, 'rashi' => $unit['units'], 'degree' => $unit['parts']];
+        }
+
+        return $this->temp[self::KEY_MRITYU];
+    }
+
+    /**
+     * Get Artha Praharaka (time-based) upagraha.
+     *
+     * @return array
+     */
+    public function getArthaPraharaka()
+    {
+        $this->checkData();
+
+        if (!isset($this->temp[self::KEY_ARTHA_PRAHARAKA])) {
+            $timeBased = $this->getTimeBasedUpagrahas();
+            $lng = $timeBased[self::KEY_ARTHA_PRAHARAKA] ?? 0;
+            $unit = Math::partsToUnits($lng);
+            $this->temp[self::KEY_ARTHA_PRAHARAKA] = ['longitude' => $lng, 'rashi' => $unit['units'], 'degree' => $unit['parts']];
+        }
+
+        return $this->temp[self::KEY_ARTHA_PRAHARAKA];
+    }
+
+    /**
+     * Get Yama Ghantaka (time-based) upagraha.
+     *
+     * @return array
+     */
+    public function getYamaGhantaka()
+    {
+        $this->checkData();
+
+        if (!isset($this->temp[self::KEY_YAMAGHANTAKA])) {
+            $timeBased = $this->getTimeBasedUpagrahas();
+            $lng = $timeBased[self::KEY_YAMAGHANTAKA] ?? 0;
+            $unit = Math::partsToUnits($lng);
+            $this->temp[self::KEY_YAMAGHANTAKA] = ['longitude' => $lng, 'rashi' => $unit['units'], 'degree' => $unit['parts']];
+        }
+
+        return $this->temp[self::KEY_YAMAGHANTAKA];
+    }
+
+    /**
+     * Get Gulika (time-based) upagraha.
+     *
+     * @return array
+     */
+    public function getGulika()
+    {
+        $this->checkData();
+
+        if (!isset($this->temp[self::KEY_GULIKA])) {
+            $timeBased = $this->getTimeBasedUpagrahas();
+            $lng = $timeBased[self::KEY_GULIKA] ?? 0;
+            $unit = Math::partsToUnits($lng);
+            $this->temp[self::KEY_GULIKA] = ['longitude' => $lng, 'rashi' => $unit['units'], 'degree' => $unit['parts']];
+        }
+
+        return $this->temp[self::KEY_GULIKA];
+    }
+
+    /**
+     * Get Mandi (time-based) upagraha.
+     *
+     * @return array
+     */
+    public function getMandi()
+    {
+        $this->checkData();
+
+        if (!isset($this->temp[self::KEY_MANDI])) {
+            $timeBased = $this->getTimeBasedUpagrahas();
+            $lng = $timeBased[self::KEY_MANDI] ?? 0;
+            $unit = Math::partsToUnits($lng);
+            $this->temp[self::KEY_MANDI] = ['longitude' => $lng, 'rashi' => $unit['units'], 'degree' => $unit['parts']];
+        }
+
+        return $this->temp[self::KEY_MANDI];
+    }
+
     /**
      * Generation of Upagrahas.
      * 

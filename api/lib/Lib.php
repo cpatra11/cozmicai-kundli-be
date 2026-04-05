@@ -84,6 +84,7 @@ class Lib
         $dst_hour = $params['dst_hour'] ?? 0;
         $dst_min = $params['dst_min'] ?? 0;
         $nesting = $params['nesting'] ?? 0;
+        $periodKey = $params['period_key'] ?? null;
         $varga = $params['varga'] ?? ["D1"];
         $infolevel = $params['infolevel'] ?? [];
         $ayanamsha = $params['ayanamsha'] ?? null;
@@ -103,6 +104,7 @@ class Lib
             $dst_min,
             $varga,
             $nesting,
+            $periodKey,
             $infolevel,
             $ayanamsha,
             $node_type
@@ -279,6 +281,7 @@ class Lib
             "D60",
         ],
         $nesting = 4,
+        $periodKey = null,
         array $infolevel = ["basic", "ashtakavarga", "grahabala", "rashibala", "yogas", "panchanga", "transit"],
         $ayanamsha = null,
         $node_type = 'mean'
@@ -313,6 +316,15 @@ class Lib
             $data->calcRising();
             $data->calcHora();
             $data->calcHora(Hora::TYPE_YAMA);
+        }
+
+        if (in_array('upagraha', $infolevel)) {
+            if (!in_array('panchanga', $infolevel)) {
+                // Upagraha requires sunrise/sunset boundaries so ensure relevant data is calculated.
+                $data->calcPanchanga();
+                $data->calcRising();
+            }
+            $data->calcUpagraha();
         }
         
         $analysis = new Analysis($data);
@@ -400,7 +412,7 @@ class Lib
         $nakshatra = $angaDefiner->getNakshatra(false, false, Lagna::KEY_LG);
         $vargaData['lagna'][Lagna::KEY_LG]['nakshatra'] = $nakshatra;
 
-        $data->calcDasha(Dasha::TYPE_VIMSHOTTARI, null, ['nesting' => $nesting]);
+        $data->calcDasha(Dasha::TYPE_VIMSHOTTARI, $periodKey, ['nesting' => $nesting]);
         $dasha = $data->getData();
 
 
