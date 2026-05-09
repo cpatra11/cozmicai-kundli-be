@@ -1,0 +1,8 @@
+vendor/
+var/cache/
+var/log/
+.git/
+.DS_Store
+docker-compose.yml
+Dockerfile
+*.md
