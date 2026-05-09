@@ -17,6 +17,7 @@ class Varga
     const KEY_D2  = 'D2';
     const KEY_D3  = 'D3';
     const KEY_D4  = 'D4';
+    const KEY_D6  = 'D6';
     const KEY_D7  = 'D7';
     const KEY_D9  = 'D9';
     const KEY_D10 = 'D10';
@@ -41,6 +42,7 @@ class Varga
         self::KEY_D2  => 'Hora',
         self::KEY_D3  => 'Drekkana',
         self::KEY_D4  => 'Chaturthamsha',
+        self::KEY_D6  => 'Shashtamsha',
         self::KEY_D7  => 'Saptamamsha',
         self::KEY_D9  => 'Navamsha',
         self::KEY_D10 => 'Dashamsha',
