@@ -1,5 +1,9 @@
+{
+    frankenphp
+}
+
 :8080 {
     root * /var/www/api/public
-    php_fastcgi localhost:9000
+    php_server
     file_server
 }
