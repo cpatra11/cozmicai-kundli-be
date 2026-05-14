@@ -10,3 +10,12 @@
 /swetest/src/*.o
 .env
 ###< symfony/framework-bundle ###
+
+# logs
+*.log
+
+# IDE
+.vscode/
+*.swp
+*.swo
+

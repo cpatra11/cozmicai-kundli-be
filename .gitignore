@@ -1,24 +1,30 @@
+# OS
 .DS_Store
+Thumbs.db
 
-# phpstorm project files
+# IDE
 .idea
-
-# netbeans project files
+.vscode/
+*.swp
+*.swo
 nbproject
-
-# zend studio for eclipse project files
 .buildpath
 .project
 .settings
 
-# composer vendor dir
+# PHP
 vendor
 composer.lock
-
-# local phpunit config
 phpunit.xml
+.phpunit.result.cache
 
-# log files
+# logs
+*.log
 tests/logs
 
-*/node_module/*
+# node (if any)
+*/node_modules/*
+
+# env (api/.gitignore covers api/, this covers root)
+.env
+.env.local
