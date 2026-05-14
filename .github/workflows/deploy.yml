@@ -2,7 +2,7 @@ name: Deploy be1 to EC2
 
 on:
   push:
-    branches: [main]
+    branches: [feat/d6-shashtamsa-varga]
   workflow_dispatch:
 
 jobs:
