@@ -3,7 +3,7 @@
 }
 
 :8080 {
-    root * /var/www/api/public
+    root * public
     php_server
     file_server
 }
